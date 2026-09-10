@@ -315,3 +315,172 @@ imprevisível dependendo do escalonamento.
 gcc questao3.c -o questao3
 ./questao3
 ```
+## Questões 4, 5 e 6 — Soluções em Python
+
+As questões foram desenvolvidas em Python e executadas no Google Colab. 
+
+## Questão 4 — Pipeline com três threads
+
+### Descrição da solução
+
+A questão 4 implementa uma linha de processamento composta por três threads:
+
+1. **Captura:** produz os itens que serão processados;
+2. **Processamento:** recebe cada item e calcula seu quadrado;
+3. **Gravação:** recebe e armazena os resultados processados.
+
+Duas instâncias de `queue.Queue(maxsize=capacidade)` conectam os três estágios e funcionam como filas limitadas. A classe `Queue` implementa internamente mecanismos equivalentes a mutex e variáveis de condição. `put()` bloqueia quando a fila está cheia e `get()` quando está vazia, sem espera ativa.
+
+O objeto sentinela `POISON` é utilizado como protocolo de encerramento. Depois de capturar todos os itens, a primeira thread coloca a sentinela na fila. A thread de processamento a recebe, encaminha-a para a próxima fila e encerra sua execução. Por fim, a thread de gravação recebe a sentinela e também termina.
+
+A thread principal executa `join()` nas três threads. A asserção final compara os resultados gravados aos esperados, permitindo detectar perda, duplicação ou alteração da ordem.
+
+### Execução no Google Colab
+
+```python
+_ = executar(n=1000, capacidade=8)
+```
+
+O `_` recebe a lista retornada e evita que o Colab mostre todos os resultados na tela.
+
+### Resultado obtido
+
+```text
+Processados 1000/1000 itens em 0.020316s; sem perdas.
+```
+
+O programa processou corretamente os 1.000 itens em aproximadamente 0,020316 segundo. Cada resultado é uma tupla no formato `(item capturado, resultado processado)`. Por exemplo, `(5, 25)` significa que o item 5 foi capturado, seu quadrado foi calculado e o valor 25 foi gravado.
+
+A mensagem `sem perdas` confirma que todos os itens chegaram ao último estágio exatamente uma vez. O encerramento das três threads demonstra que o protocolo de poison pill funcionou sem deadlock.
+
+## Questão 5 — Pool fixo de threads
+
+### Descrição da solução
+
+A questão 5 implementa um pool fixo de `N` threads para processar uma fila concorrente de tarefas CPU-bound. Cada tarefa verifica se um número inteiro é primo.
+
+As threads trabalhadoras são criadas uma única vez. A principal coloca na fila objetos `Tarefa`, contendo um identificador sequencial e o número analisado. Cada worker retira uma tarefa e executa o teste. `queue.Queue` torna thread-safe as operações de inserção e remoção.
+
+Depois das entradas, a principal insere uma poison pill para cada worker. `tarefas.join()` aguarda o processamento e `worker.join()` aguarda o encerramento das threads. Os identificadores confirmam que nenhuma tarefa desapareceu ou foi processada mais de uma vez. Os resultados são ordenados pelo ID original, produzindo uma saída determinística.
+
+### Execução no Google Colab
+
+```python
+numeros = ["2", "17", "18", "7919", "1"]
+resultados = executar(n_threads=4, linhas=numeros)
+
+for _, numero, primo in resultados:
+    print(f"{numero}: {'primo' if primo else 'não primo'}")
+```
+
+### Resultado obtido
+
+```text
+2: primo
+17: primo
+18: não primo
+7919: primo
+1: não primo
+```
+
+Os resultados estão corretos: 2, 17 e 7919 são primos; 18 não é primo; e 1 não é primo, pois possui apenas um divisor positivo.
+
+Foram processadas cinco tarefas por quatro threads. A verificação dos identificadores confirmou que todas foram executadas exatamente uma vez, sem perdas ou duplicações. Embora possam terminar internamente em ordens diferentes, são apresentadas na ordem de entrada.
+
+Por causa do GIL do CPython, threads não necessariamente aceleram cálculos CPU-bound. O objetivo desta questão é demonstrar a implementação correta do pool fixo, da fila thread-safe e do encerramento.
+
+## Questão 6 — MapReduce paralelo
+
+### Descrição da solução
+
+A questão 6 lê um arquivo de inteiros e calcula a soma total e o histograma de frequências. O arquivo é dividido em blocos, e o `map` é executado com 1, 2, 4 e 8 threads.
+
+Cada thread processa somente seu bloco e calcula localmente a soma e um `Counter`. As threads não alteram diretamente um resultado global, reduzindo a sincronização e evitando condições de corrida. Após o `map`, a thread principal realiza o `reduce`, somando os resultados e combinando os histogramas. Não existem locks explícitos durante o `map`, portanto a exclusão mútua é mínima.
+
+Para cada número de threads, asserções comparam a soma e o histograma paralelos aos resultados sequenciais. O speedup é calculado por:
+
+$$
+S_p = \frac{T_1}{T_p}
+$$
+
+Em que $T_1$ é o tempo com uma thread e $T_p$ é o tempo com $p$ threads.
+
+### Execução no Google Colab
+
+```python
+from pathlib import Path
+
+arquivo = Path("inteiros.txt")
+gerar_arquivo(arquivo, quantidade=1_000_000, maximo=100)
+benchmark(arquivo)
+```
+
+### Resultado obtido
+
+Foram lidos 1.000.000 de inteiros.
+
+| Número de threads | Tempo | Speedup |
+|---:|---:|---:|
+| 1 | 0,092198 s | 1,000× |
+| 2 | 0,072937 s | 1,264× |
+| 4 | 0,076186 s | 1,210× |
+| 8 | 0,076245 s | 1,209× |
+
+A soma total encontrada foi:
+
+```text
+49.995.219
+```
+
+O melhor resultado ocorreu com duas threads: 0,072937 segundo e speedup de 1,264×, uma melhoria aproximada de 26,4% em relação a uma thread.
+
+Quatro threads obtiveram speedup de 1,210× e oito threads, 1,209×. Aumentar o número acima de duas não trouxe ganho adicional. Isso pode decorrer do gerenciamento das threads, divisão e combinação dos blocos, GIL do CPython, núcleos disponíveis e carga do Colab.
+
+### Histograma de frequências
+
+Cada entrada possui o formato `valor: frequência`. Alguns exemplos obtidos foram:
+
+```text
+0: 10087
+1: 9849
+2: 9838
+67: 10143
+78: 10205
+90: 9672
+100: 9952
+```
+
+Como foram gerados valores de 0 a 100, existem 101 possibilidades. A frequência média esperada é:
+
+$$
+\frac{1.000.000}{101} \approx 9.901
+$$
+
+As frequências ficaram próximas desse valor. Todas as execuções produziram a mesma soma e o mesmo histograma, e as asserções terminaram sem erros. Os tempos podem variar em novas execuções conforme o ambiente do Colab.
+
+## Garantias de correção
+
+### Questão 4
+
+- As filas bloqueantes eliminam a espera ativa;
+- a poison pill encerra todos os estágios;
+- `join()` aguarda as três threads;
+- a comparação integral confirma ausência de perdas, duplicações e alterações de ordem;
+- os 1.000 itens foram processados corretamente.
+
+### Questão 5
+
+- A fila sincronizada permite acesso concorrente seguro;
+- o pool possui quantidade fixa de threads;
+- uma poison pill por worker garante o encerramento;
+- os identificadores comprovam que nenhuma tarefa foi perdida ou duplicada;
+- os cinco números foram classificados corretamente.
+
+### Questão 6
+
+- Cada thread trabalha com dados locais e independentes;
+- a redução é realizada pela thread principal;
+- não existem locks explícitos no `map`;
+- as asserções comparam os resultados paralelos aos sequenciais;
+- todas as configurações produziram a soma 49.995.219 e histogramas iguais;
+- duas threads obtiveram o melhor desempenho, com speedup de 1,264×.
