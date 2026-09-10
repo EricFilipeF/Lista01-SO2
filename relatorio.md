@@ -484,3 +484,682 @@ As frequências ficaram próximas desse valor. Todas as execuções produziram a
 - as asserções comparam os resultados paralelos aos sequenciais;
 - todas as configurações produziram a soma 49.995.219 e histogramas iguais;
 - duas threads obtiveram o melhor desempenho, com speedup de 1,264×.
+
+## Questão 7 — Jantar dos filósofos com mutex
+
+### Enunciado
+
+Cada filósofo possui dois garfos compartilhados com seus vizinhos. Os garfos são representados por `Lock` (mutex). Foram implementadas duas soluções para evitar deadlock:
+
+- **a. Ordem global de aquisição:** cada filósofo sempre adquire primeiro o garfo de menor número e depois o de maior número.
+- **b. Semáforo:** um semáforo limita para quatro o número de filósofos que podem tentar adquirir os garfos simultaneamente.
+
+Também são coletadas métricas individuais de cada filósofo: número de refeições e maior tempo de espera. Para reduzir starvation, o filósofo realiza tentativas em ordem controlada e usa uma pequena pausa após liberar os garfos, permitindo que outros filósofos tenham oportunidade de executar.
+
+### Código em Python
+
+```python
+import threading
+import time
+import random
+
+NUM_FILOSOFOS = 5
+REFEICOES_POR_FILOSOFO = 10
+
+
+class Filosofo:
+    def __init__(self, id):
+        self.id = id
+        self.refeicoes = 0
+        self.maior_espera = 0.0
+
+
+# ============================================================
+# SOLUÇÃO A - ORDEM GLOBAL DE AQUISIÇÃO
+# ============================================================
+
+def solucao_ordem_global():
+
+    print("\n==========================================")
+    print("SOLUÇÃO A - ORDEM GLOBAL DE AQUISIÇÃO")
+    print("==========================================")
+
+    garfos = [threading.Lock() for _ in range(NUM_FILOSOFOS)]
+    filosofos = [Filosofo(i) for i in range(NUM_FILOSOFOS)]
+
+    def executar(f):
+
+        esquerdo = f.id
+        direito = (f.id + 1) % NUM_FILOSOFOS
+
+        # Sempre adquire primeiro o garfo de menor número.
+        primeiro = min(esquerdo, direito)
+        segundo = max(esquerdo, direito)
+
+        for _ in range(REFEICOES_POR_FILOSOFO):
+
+            # Pensando
+            time.sleep(random.uniform(0.01, 0.05))
+
+            inicio_espera = time.monotonic()
+
+            garfos[primeiro].acquire()
+            garfos[segundo].acquire()
+
+            fim_espera = time.monotonic()
+
+            espera = fim_espera - inicio_espera
+
+            if espera > f.maior_espera:
+                f.maior_espera = espera
+
+            # Comendo
+            time.sleep(random.uniform(0.01, 0.03))
+            f.refeicoes += 1
+
+            garfos[segundo].release()
+            garfos[primeiro].release()
+
+            # Ajuda a reduzir starvation, dando oportunidade
+            # para outras threads executarem.
+            time.sleep(0.001)
+
+    threads = []
+
+    for f in filosofos:
+        t = threading.Thread(target=executar, args=(f,))
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    print("\nMétricas:")
+    for f in filosofos:
+        print(
+            f"Filósofo {f.id}: "
+            f"refeições = {f.refeicoes}, "
+            f"maior espera = {f.maior_espera:.4f}s"
+        )
+
+
+# ============================================================
+# SOLUÇÃO B - SEMÁFORO LIMITANDO A 4 FILÓSOFOS
+# ============================================================
+
+def solucao_semaforo():
+
+    print("\n==========================================")
+    print("SOLUÇÃO B - SEMÁFORO COM 4 FILÓSOFOS")
+    print("==========================================")
+
+    garfos = [threading.Lock() for _ in range(NUM_FILOSOFOS)]
+
+    # No máximo quatro filósofos podem tentar
+    # adquirir garfos simultaneamente.
+    limite = threading.Semaphore(4)
+
+    filosofos = [Filosofo(i) for i in range(NUM_FILOSOFOS)]
+
+    def executar(f):
+
+        esquerdo = f.id
+        direito = (f.id + 1) % NUM_FILOSOFOS
+
+        for _ in range(REFEICOES_POR_FILOSOFO):
+
+            time.sleep(random.uniform(0.01, 0.05))
+
+            inicio_espera = time.monotonic()
+
+            limite.acquire()
+
+            garfos[esquerdo].acquire()
+            garfos[direito].acquire()
+
+            fim_espera = time.monotonic()
+
+            espera = fim_espera - inicio_espera
+
+            if espera > f.maior_espera:
+                f.maior_espera = espera
+
+            time.sleep(random.uniform(0.01, 0.03))
+            f.refeicoes += 1
+
+            garfos[direito].release()
+            garfos[esquerdo].release()
+
+            limite.release()
+
+            # Pequena pausa para reduzir a possibilidade
+            # de uma mesma thread monopolizar os recursos.
+            time.sleep(0.001)
+
+    threads = []
+
+    for f in filosofos:
+        t = threading.Thread(target=executar, args=(f,))
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    print("\nMétricas:")
+    for f in filosofos:
+        print(
+            f"Filósofo {f.id}: "
+            f"refeições = {f.refeicoes}, "
+            f"maior espera = {f.maior_espera:.4f}s"
+        )
+
+
+if __name__ == "__main__":
+    solucao_ordem_global()
+    solucao_semaforo()
+```
+
+### Explicação da solução A
+
+Na primeira solução, os garfos são representados por `threading.Lock()`. O problema de deadlock é evitado estabelecendo uma **ordem global**: todos os filósofos adquirem primeiro o garfo de menor índice e depois o de maior índice.
+
+Por exemplo, se o filósofo 0 utiliza os garfos 0 e 1, ele pega primeiro o 0. O filósofo 4 utiliza os garfos 4 e 0 e, seguindo a mesma regra, pega primeiro o 0 e depois o 4. Como todos respeitam a mesma ordem, não é possível criar um ciclo em que cada filósofo segura um recurso e espera pelo recurso seguinte.
+
+### Explicação da solução B
+
+Na segunda solução, foi utilizado:
+
+```python
+limite = threading.Semaphore(4)
+```
+
+Como existem cinco filósofos, o semáforo permite que no máximo quatro entrem simultaneamente na região em que tentam adquirir os garfos. Isso elimina a situação clássica em que os cinco filósofos pegam um garfo ao mesmo tempo e ficam esperando pelo segundo.
+
+Depois que o filósofo termina de comer, ele libera os dois garfos e também uma vaga do semáforo.
+
+### Métricas e starvation
+
+Cada filósofo possui:
+
+```python
+self.refeicoes = 0
+self.maior_espera = 0.0
+```
+
+`refeicoes` registra quantas vezes ele conseguiu comer. `maior_espera` registra o maior intervalo entre o início da tentativa de aquisição dos recursos e a obtenção dos dois garfos.
+
+Para mitigar starvation, foi adicionada uma pequena pausa depois que os recursos são liberados:
+
+```python
+time.sleep(0.001)
+```
+
+Isso evita que uma thread tente imediatamente adquirir os mesmos recursos repetidamente e dá oportunidade de execução às demais threads. A comparação das métricas também permite verificar se algum filósofo está ficando com muito menos refeições ou uma espera muito maior que os outros.
+
+---
+
+## Questão 8 — Buffer com bursts, ociosidade e backpressure
+
+### Enunciado
+
+A questão 8 estende o problema do produtor-consumidor da Questão 2. Em vez de produzir os itens em uma taxa aproximadamente constante, os produtores trabalham em **rajadas (bursts)** e depois entram em períodos de ociosidade.
+
+Quando os consumidores ficam mais lentos e o buffer se aproxima da capacidade máxima, é aplicado **backpressure**: os produtores precisam aguardar até que um consumidor retire itens e libere espaço.
+
+Além disso, a ocupação do buffer é registrada ao longo do tempo para analisar a estabilidade do sistema.
+
+A Questão 2 utiliza um buffer circular protegido por mutex e variáveis de condição. A condição `cond_nao_cheio` faz o produtor dormir quando o buffer está cheio, enquanto `cond_nao_vazio` faz o consumidor dormir quando o buffer está vazio. Essa estrutura evita espera ativa. fileciteturn0file0L94-L124
+
+### Código em Python
+
+```python
+import threading
+import time
+import random
+from collections import deque
+
+NUM_PRODUTORES = 6
+NUM_CONSUMIDORES = 2
+
+ITENS_POR_PRODUTOR = 40
+TAMANHO_BUFFER = 10
+
+# Tamanho das rajadas
+BURST_MIN = 2
+BURST_MAX = 6
+
+# Período de ociosidade entre rajadas
+OCIOSIDADE_MIN = 0.02
+OCIOSIDADE_MAX = 0.08
+
+# Consumidores propositalmente mais lentos
+CONSUMO_MIN = 0.03
+CONSUMO_MAX = 0.12
+
+
+# ============================================================
+# BUFFER COMPARTILHADO
+# ============================================================
+
+buffer = deque()
+
+mutex = threading.Lock()
+
+cond_nao_vazio = threading.Condition(mutex)
+cond_nao_cheio = threading.Condition(mutex)
+
+produtores_ativos = NUM_PRODUTORES
+
+
+# ============================================================
+# MÉTRICAS
+# ============================================================
+
+ocupacoes = []
+
+soma_espera = 0.0
+itens_consumidos = 0
+
+inicio_experimento = time.monotonic()
+
+
+def registrar_ocupacao():
+    """Registra tempo e quantidade atual de itens no buffer."""
+
+    tempo = time.monotonic() - inicio_experimento
+
+    ocupacoes.append(
+        (tempo, len(buffer))
+    )
+
+
+# ============================================================
+# PRODUTOR
+# ============================================================
+
+def produtor(id_produtor):
+
+    global produtores_ativos
+
+    random.seed(time.time() + id_produtor)
+
+    produzidos = 0
+
+    while produzidos < ITENS_POR_PRODUTOR:
+
+        # ----------------------------------------------------
+        # CRIA UMA RAJADA
+        # ----------------------------------------------------
+
+        tamanho_burst = random.randint(
+            BURST_MIN,
+            BURST_MAX
+        )
+
+        tamanho_burst = min(
+            tamanho_burst,
+            ITENS_POR_PRODUTOR - produzidos
+        )
+
+        print(
+            f"[Produtor {id_produtor}] "
+            f"Iniciando burst de {tamanho_burst} itens"
+        )
+
+        for _ in range(tamanho_burst):
+
+            # Produção rápida dentro do burst
+            time.sleep(
+                random.uniform(0.001, 0.01)
+            )
+
+            with cond_nao_cheio:
+
+                # ------------------------------------------------
+                # BACKPRESSURE
+                #
+                # Se o buffer estiver cheio, o produtor dorme
+                # até que um consumidor libere espaço.
+                # ------------------------------------------------
+
+                while len(buffer) >= TAMANHO_BUFFER:
+
+                    print(
+                        f"[Produtor {id_produtor}] "
+                        f"BACKPRESSURE - buffer cheio"
+                    )
+
+                    cond_nao_cheio.wait()
+
+                item = (
+                    id_produtor,
+                    produzidos,
+                    time.monotonic()
+                )
+
+                buffer.append(item)
+
+                produzidos += 1
+
+                registrar_ocupacao()
+
+                print(
+                    f"[Produtor {id_produtor}] "
+                    f"produziu item {produzidos} "
+                    f"| buffer = "
+                    f"{len(buffer)}/{TAMANHO_BUFFER}"
+                )
+
+                cond_nao_vazio.notify()
+
+        # ----------------------------------------------------
+        # PERÍODO DE OCIOSIDADE
+        # ----------------------------------------------------
+
+        tempo_ocioso = random.uniform(
+            OCIOSIDADE_MIN,
+            OCIOSIDADE_MAX
+        )
+
+        print(
+            f"[Produtor {id_produtor}] "
+            f"ocioso por {tempo_ocioso:.3f}s"
+        )
+
+        time.sleep(tempo_ocioso)
+
+    # --------------------------------------------------------
+    # PRODUTOR TERMINOU
+    # --------------------------------------------------------
+
+    with cond_nao_vazio:
+
+        produtores_ativos -= 1
+
+        if produtores_ativos == 0:
+            cond_nao_vazio.notify_all()
+
+
+# ============================================================
+# CONSUMIDOR
+# ============================================================
+
+def consumidor(id_consumidor):
+
+    global soma_espera
+    global itens_consumidos
+
+    random.seed(
+        time.time() + id_consumidor + 1000
+    )
+
+    while True:
+
+        with cond_nao_vazio:
+
+            while (
+                len(buffer) == 0
+                and produtores_ativos > 0
+            ):
+                cond_nao_vazio.wait()
+
+            # Todos os produtores terminaram
+            # e não há mais itens.
+            if (
+                len(buffer) == 0
+                and produtores_ativos == 0
+            ):
+                break
+
+            item = buffer.popleft()
+
+            agora = time.monotonic()
+
+            tempo_espera = (
+                agora - item[2]
+            )
+
+            soma_espera += tempo_espera
+            itens_consumidos += 1
+
+            registrar_ocupacao()
+
+            print(
+                f"[Consumidor {id_consumidor}] "
+                f"consumiu item "
+                f"| buffer = "
+                f"{len(buffer)}/{TAMANHO_BUFFER}"
+            )
+
+            # Libera produtores bloqueados
+            # pelo backpressure.
+            cond_nao_cheio.notify()
+
+        # Consumidor processa o item fora do mutex.
+        tempo_consumo = random.uniform(
+            CONSUMO_MIN,
+            CONSUMO_MAX
+        )
+
+        time.sleep(tempo_consumo)
+
+
+# ============================================================
+# EXECUÇÃO DO EXPERIMENTO
+# ============================================================
+
+def executar():
+
+    global inicio_experimento
+
+    inicio_experimento = time.monotonic()
+
+    produtores = []
+    consumidores = []
+
+    print("==============================================")
+    print("QUESTÃO 8 - BUFFER COM BURSTS E BACKPRESSURE")
+    print("==============================================")
+
+    print(
+        f"\nProdutores: {NUM_PRODUTORES}"
+    )
+
+    print(
+        f"Consumidores: {NUM_CONSUMIDORES}"
+    )
+
+    print(
+        f"Tamanho do buffer: {TAMANHO_BUFFER}"
+    )
+
+    print(
+        f"Itens por produtor: {ITENS_POR_PRODUTOR}"
+    )
+
+    print()
+
+    # Cria produtores
+    for i in range(NUM_PRODUTORES):
+
+        t = threading.Thread(
+            target=produtor,
+            args=(i,)
+        )
+
+        produtores.append(t)
+        t.start()
+
+    # Cria consumidores
+    for i in range(NUM_CONSUMIDORES):
+
+        t = threading.Thread(
+            target=consumidor,
+            args=(i,)
+        )
+
+        consumidores.append(t)
+        t.start()
+
+    # Espera os produtores
+    for t in produtores:
+        t.join()
+
+    # Espera os consumidores
+    for t in consumidores:
+        t.join()
+
+    # ========================================================
+    # MÉTRICAS FINAIS
+    # ========================================================
+
+    tempo_total = (
+        time.monotonic() -
+        inicio_experimento
+    )
+
+    ocupacao_media = (
+        sum(o[1] for o in ocupacoes)
+        / len(ocupacoes)
+    )
+
+    ocupacao_maxima = max(
+        o[1] for o in ocupacoes
+    )
+
+    espera_media = (
+        soma_espera /
+        itens_consumidos
+    )
+
+    vazao = (
+        itens_consumidos /
+        tempo_total
+    )
+
+    print("\n==============================================")
+    print("RESULTADOS")
+    print("==============================================")
+
+    print(
+        f"Tempo total: {tempo_total:.2f} s"
+    )
+
+    print(
+        f"Itens consumidos: {itens_consumidos}"
+    )
+
+    print(
+        f"Vazão: {vazao:.2f} itens/s"
+    )
+
+    print(
+        f"Espera média no buffer: "
+        f"{espera_media * 1000:.2f} ms"
+    )
+
+    print(
+        f"Ocupação média do buffer: "
+        f"{ocupacao_media:.2f} itens"
+    )
+
+    print(
+        f"Ocupação máxima do buffer: "
+        f"{ocupacao_maxima} itens"
+    )
+
+
+if __name__ == "__main__":
+    executar()
+```
+
+### Rajadas de produção
+
+A produção é dividida em rajadas usando:
+
+```python
+tamanho_burst = random.randint(
+    BURST_MIN,
+    BURST_MAX
+)
+```
+
+Assim, um produtor pode produzir rapidamente vários itens consecutivos. Depois da rajada, ele entra em um período de ociosidade:
+
+```python
+time.sleep(tempo_ocioso)
+```
+
+Esse comportamento representa uma aplicação em que a carga não chega de forma uniforme, mas em picos.
+
+### Backpressure
+
+O backpressure é implementado pela condição:
+
+```python
+while len(buffer) >= TAMANHO_BUFFER:
+    cond_nao_cheio.wait()
+```
+
+Quando uma rajada faz o buffer atingir sua capacidade, o produtor não continua acumulando itens. Ele fica bloqueado até que um consumidor retire um item.
+
+Quando isso acontece, o consumidor executa:
+
+```python
+cond_nao_cheio.notify()
+```
+
+liberando um produtor que estava aguardando.
+
+Essa abordagem é uma extensão direta da lógica da Questão 2, que já utiliza uma variável de condição para fazer produtores aguardarem quando o buffer está cheio. fileciteturn0file0L107-L136
+
+### Registro da ocupação
+
+A ocupação é registrada sempre que um item entra ou sai:
+
+```python
+ocupacoes.append(
+    (tempo, len(buffer))
+)
+```
+
+Cada registro possui:
+
+- o instante da medição;
+- a quantidade de itens presentes no buffer.
+
+Ao final são calculadas:
+
+- ocupação média;
+- ocupação máxima;
+- tempo médio de espera;
+- vazão total.
+
+A Questão 2 já utiliza o tempo de entrada do item no buffer para calcular seu tempo de espera e utiliza a quantidade de itens processados dividida pelo tempo total para calcular a vazão. fileciteturn0file0L148-L154
+
+### Análise da estabilidade
+
+Se a ocupação do buffer permanece próxima da capacidade máxima durante grande parte da execução, significa que os produtores estão gerando itens mais rapidamente do que os consumidores conseguem processar.
+
+Por exemplo:
+
+```text
+2 → 5 → 8 → 10 → 10 → 9 → 10 → 10
+```
+
+indica que o sistema está frequentemente saturado. Nesse caso, o backpressure entra em ação várias vezes.
+
+Por outro lado, uma ocupação oscilando entre valores baixos e altos, como:
+
+```text
+2 → 6 → 9 → 5 → 2 → 7 → 10 → 4
+```
+
+indica que o sistema está alternando entre rajadas de produção e períodos de consumo.
+
+A vazão continua limitada principalmente pela capacidade dos consumidores. Na Questão 2, os consumidores foram propositalmente configurados como mais lentos que os produtores, fazendo com que eles se tornassem o gargalo do sistema. fileciteturn0file0L161-L187
+
+### Conclusão da Questão 8
+
+A implementação demonstra que o backpressure impede que produtores continuem aumentando a fila indefinidamente quando a taxa de consumo diminui. Em vez disso, eles aguardam espaço no buffer. O registro da ocupação permite observar os momentos de saturação e de ociosidade e verificar se o sistema consegue retornar a níveis menores de ocupação após os bursts. Dessa forma, é possível analisar experimentalmente a estabilidade do produtor-consumidor sob uma carga variável.
