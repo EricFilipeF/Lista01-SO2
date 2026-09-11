@@ -1163,3 +1163,26 @@ A vazão continua limitada principalmente pela capacidade dos consumidores. Na Q
 ### Conclusão da Questão 8
 
 A implementação demonstra que o backpressure impede que produtores continuem aumentando a fila indefinidamente quando a taxa de consumo diminui. Em vez disso, eles aguardam espaço no buffer. O registro da ocupação permite observar os momentos de saturação e de ociosidade e verificar se o sistema consegue retornar a níveis menores de ocupação após os bursts. Dessa forma, é possível analisar experimentalmente a estabilidade do produtor-consumidor sob uma carga variável.
+
+### Questão 9
+Como o Python não possui pthread_barrier_t nativo, foi colocado manualmente usando mutex e uma variável de condição;
+Cada thread incrementa o contador da barreira ao chegar;
+
+-Se for a última a chegar (count == num_teams), ela reseta o contador e notifica todas as outras com notify_all();
+-As demais threads ficam bloqueadas em cond.wait() até serem notificadas, só então todas prosseguem juntas para a próxima perna;
+
+Observações importantes:
+Quanto maior a equipe, mais tempo se gasta esperando na barreira (a thread mais lenta define o ritmo)
+
+O número de rodadas/minuto diminui com o aumento do tamanho da equipe (Lei de Amdahl)
+
+A barreira introduz overhead de sincronização proporcional ao número de participantes
+
+### Questão 10
+Padrão Watchdog: O watchdog é uma thread "sentinela" que monitora a atividade das outras threads. Se alguma thread não progride por mais de T segundos, é sinal de possível deadlock(duas ou mais threads estão bloqueadas).Cada thread registra um timestamp de progresso (last_progress) sempre que adquire/libera recursos;
+-O watchdog compara periodicamente: agora - last_progress > timeout? ; Se sim, emite relatório dos recursos suspeitos
+---Criação do Deadlock -> Foram usados 5 threads com padrões de aquisição em ciclo, garantindo a condição de espera circular de Coffman: T0 → R2 (T1 tem) → R3 (T2 tem) → R4 (T3 tem) → R5 (T4 tem) → R1 (T0 tem)
+
+-Sem Ordem Total -> Cada thread pega na ordem do seu padrão, permitindo que o ciclo se forme, e ocorre o deadlock
+-Com Ordem Total -> Se todas as threads adquirem recursos na mesma ordem global (ex: sempre R1 < R2 < R3 < R4 < R5), o ciclo de dependência não pode se formar, não ocorrendo deadlock;
+
