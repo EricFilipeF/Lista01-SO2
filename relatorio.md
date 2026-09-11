@@ -1165,7 +1165,26 @@ A vazão continua limitada principalmente pela capacidade dos consumidores. Na Q
 A implementação demonstra que o backpressure impede que produtores continuem aumentando a fila indefinidamente quando a taxa de consumo diminui. Em vez disso, eles aguardam espaço no buffer. O registro da ocupação permite observar os momentos de saturação e de ociosidade e verificar se o sistema consegue retornar a níveis menores de ocupação após os bursts. Dessa forma, é possível analisar experimentalmente a estabilidade do produtor-consumidor sob uma carga variável.
 
 ### Questão 9
-Como o Python não possui pthread_barrier_t nativo, foi colocado manualmente usando mutex e uma variável de condição;
+Como o Python não possui pthread_barrier_t nativo, foi colocado manualmente usando mutex e uma variável de condição
+def barrier_wait(self, barrier_id: int, team_id: int, member_id: int):
+    barrier = self.barriers[barrier_id]
+    
+    with barrier['mutex']:
+        barrier['count'] += 1
+        
+        # Último a chegar libera todos
+        if barrier['count'] == self.num_teams:
+            barrier['count'] = 0
+            with barrier['cond']:
+                barrier['cond'].notify_all()
+            return True  # Indica que foi o último
+        
+    # O resto aguarda
+    with barrier['cond']:
+        while barrier['count'] > 0:
+            barrier['cond'].wait()
+    
+    return False
 Cada thread incrementa o contador da barreira ao chegar;
 
 -Se for a última a chegar (count == num_teams), ela reseta o contador e notifica todas as outras com notify_all();
@@ -1180,6 +1199,24 @@ A barreira introduz overhead de sincronização proporcional ao número de parti
 
 ### Questão 10
 Padrão Watchdog: O watchdog é uma thread "sentinela" que monitora a atividade das outras threads. Se alguma thread não progride por mais de T segundos, é sinal de possível deadlock(duas ou mais threads estão bloqueadas).Cada thread registra um timestamp de progresso (last_progress) sempre que adquire/libera recursos;
+def watchdog_loop(self):
+    while self.running:
+        time.sleep(self.timeout / 2)  # Verifica periodicamente
+        
+        with self.lock:
+            current_time = time.time()
+            deadlocked_threads = []
+            
+            for thread_id, info in self.threads.items():
+                # Se passou muito tempo sem progresso
+                if current_time - info['last_progress'] > self.timeout:
+                    deadlocked_threads.append(thread_id)
+            
+            if deadlocked_threads:
+                # Relatório de suspeitos
+                print("WATCHDOG: POSSÍVEL DEADLOCK!")
+                for tid in deadlocked_threads:
+                    print(f"  Thread {tid} mantém: {self.threads[tid]['held_resources']}")
 -O watchdog compara periodicamente: agora - last_progress > timeout? ; Se sim, emite relatório dos recursos suspeitos
 ---Criação do Deadlock -> Foram usados 5 threads com padrões de aquisição em ciclo, garantindo a condição de espera circular de Coffman: T0 → R2 (T1 tem) → R3 (T2 tem) → R4 (T3 tem) → R5 (T4 tem) → R1 (T0 tem)
 
